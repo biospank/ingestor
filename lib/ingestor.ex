@@ -1,11 +1,24 @@
 defmodule Ingestor do
+  @moduledoc """
+  Documentation for Ingestor:
+
+  Build the script
+
+  mix escript.build
+
+  Run the script
+
+  ./ingestor [--help] [--freq 16000]
+
+  """
+
   @training_dir "training"
   @testing_dir "testing"
   @data_dir "data"
 
   @crops [
     {3, 2}, # start from 3rd second for 2 seconds
-    {6, 2} # start from 6rd second for 2 seconds
+    {6, 2} # start from 6th second for 2 seconds
   ]
 
   @training_volumes [
@@ -21,11 +34,28 @@ defmodule Ingestor do
     "0.2", "0.4", "0.6", "0.8", "1"
   ]
 
-  @moduledoc """
-  Documentation for `Ingestor`.
-  """
+  def main(argv) do
+    {opts, _parsed, errors} =
+      argv
+      |> OptionParser.parse(strict: [help: :boolean, freq: :integer], aliases: [h: :help, z: :freq])
 
-  def run do
+    # IO.puts("parsed errors: #{inspect(errors)}")
+
+    if errors |> Enum.empty?() do
+      run(opts)
+    else
+      IO.puts("Invalid options")
+      run(help: true)
+      System.halt(1)
+    end
+  end
+
+  def run(help: true) do
+    IO.puts @moduledoc
+    System.halt(0)
+  end
+
+  def run(opts) do
     with {:ok, _} <- remove_dir(@training_dir),
          {:ok, _} <- remove_dir(@testing_dir),
          :ok <- create_dir(@training_dir),
@@ -33,8 +63,8 @@ defmodule Ingestor do
          {:ok, audio_files} <- list_audio_files() do
 
       audio_files
-      |> ingest(:training)
-      |> ingest(:testing)
+      |> ingest(:training, opts)
+      |> ingest(:testing, opts)
 
       {:ok, :done}
     else
@@ -67,25 +97,35 @@ defmodule Ingestor do
     File.ls(@data_dir)
   end
 
-  defp ingest(files, :training = target) do
+  defp ingest(files, :training = target, opts) do
     for file <- files, volume <- @training_volumes, crop <- @crops do
-      ffmpeg_cmd(file, volume, crop, target)
+      ffmpeg_cmd(file, volume, crop, target, opts)
     end
 
     files
   end
 
-  defp ingest(files, :testing = target) do
+  defp ingest(files, :testing = target, opts) do
     for file <- files, volume <- @testing_volumes, crop <- @crops do
-      ffmpeg_cmd(file, volume, crop, target)
+      ffmpeg_cmd(file, volume, crop, target, opts)
     end
 
     files
   end
 
-  defp ffmpeg_cmd(file, volume, {start, length}, target) do
+  defp ffmpeg_cmd(file, volume, {start, length}, target, opts) do
     [name, _ext] = String.split(file, ".")
-    _result = Porcelain.shell("ffmpeg -hide_banner -loglevel error -ss #{start} -i #{@data_dir}/#{file} -t #{length} -ar 16000  -af volume=#{volume} #{target}/#{name}-#{volume}-#{start}-#{length}.wav")
+
+    options =
+      opts
+      |> Enum.reduce("", fn
+        {:freq, value}, acc ->
+          acc <> " -ar #{value} "
+        {key, value}, acc ->
+          acc <> " #{key} #{value} "
+      end)
+
+    _result = Porcelain.shell("ffmpeg -hide_banner -loglevel error -ss #{start} -i #{@data_dir}/#{file} -t #{length} #{options} -af volume=#{volume} #{target}/#{name}-#{volume}-#{start}-#{length}.wav")
     #IO.inspect result.out
   end
 

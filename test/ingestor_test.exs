@@ -3,36 +3,44 @@ defmodule IngestorTest do
   doctest Ingestor
 
   setup_all %{} do
-    result = Ingestor.run()
+    result = Ingestor.main(["--freq", "16000"])
 
     {:ok, result: result}
   end
 
-  test "returns {:ok, :done} tuple", %{result: result} do
-    assert result == {:ok, :done}
+  describe "Ingestor.main/1 arguments" do
+    test "returns {:error, 'Invalid options'} on Invalid options", %{result: result} do
+      assert result == {:error, "Invalid options"}
+    end
   end
 
-  test "creates training dir" do
-    {:ok, dirs} = File.ls()
+  describe "Ingestor.main/1" do
+    test "returns {:ok, :done} tuple", %{result: result} do
+      assert result == {:ok, :done}
+    end
 
-    assert "training" in dirs
-  end
+    test "creates training dir" do
+      {:ok, dirs} = File.ls()
 
-  test "creates testing dir" do
-    {:ok, dirs} = File.ls()
+      assert "training" in dirs
+    end
 
-    assert "testing" in dirs
-  end
+    test "creates testing dir" do
+      {:ok, dirs} = File.ls()
 
-  test "creates 38 training files" do
-    {:ok, files} = File.ls("training")
+      assert "testing" in dirs
+    end
 
-    assert Enum.count(files) == 19
-  end
+    test "creates 38 training files" do
+      {:ok, files} = File.ls("training")
 
-  test "creates 10 testing files" do
-    {:ok, files} = File.ls("testing")
+      assert Enum.count(files) == 38
+    end
 
-    assert Enum.count(files) == 5
+    test "creates 10 testing files" do
+      {:ok, files} = File.ls("testing")
+
+      assert Enum.count(files) == 10
+    end
   end
 end
