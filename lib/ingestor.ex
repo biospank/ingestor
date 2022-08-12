@@ -135,7 +135,7 @@ defmodule Ingestor do
     file
     |> audio_length()
     |> build_crops(crop_length)
-    |> IO.inspect(label: "Crops")
+    # |> IO.inspect(label: "Crops")
   end
 
   @doc ~S"""
