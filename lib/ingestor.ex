@@ -8,7 +8,7 @@ defmodule Ingestor do
 
   Run the script
 
-  ./ingestor [--help] [--freq 16000] [--length 2]
+  ./ingestor [--help] [--freq 16000] [--crop_start 1 --crop_end 6] [--crop_length 2]
 
   """
 
@@ -16,11 +16,12 @@ defmodule Ingestor do
   @testing_dir "testing"
   @data_dir "data"
 
+  @crop_start 0
   @crop_length 2
-  @crops [
-    {3, @crop_length}, # start from 3rd second for 2 seconds
-    {6, @crop_length} # start from 6th second for 2 seconds
-  ]
+  # @crops [
+  #   {3, @crop_length}, # start from 3rd second for 2 seconds
+  #   {6, @crop_length} # start from 6th second for 2 seconds
+  # ]
 
   @training_volumes [
     "0.1", "0.15", "0.2",
@@ -42,12 +43,16 @@ defmodule Ingestor do
         strict: [
           help: :boolean,
           freq: :integer,
-          length: :integer
+          crop_start: :integer,
+          crop_end: :integer,
+          crop_length: :integer
         ],
         aliases: [
           h: :help,
           z: :freq,
-          l: :length
+          s: :crop_start,
+          e: :crop_end,
+          l: :crop_length
         ]
       )
 
@@ -111,10 +116,11 @@ defmodule Ingestor do
 
   defp ingest(files, :training = target, opts) do
     {:ok, options} = extract_options(opts)
-    crop_length = opts[:length] || @crop_length
 
-    for file <- files, volume <- @training_volumes, crop <- window_crops(file, crop_length) do
-      ffmpeg_cmd(file, volume, crop, target, options)
+    for file <- files, volume <- @training_volumes, crop <- window_crops(file, opts) do
+      Task.start(fn ->
+        ffmpeg_cmd(file, volume, crop, target, options)
+      end)
     end
 
     files
@@ -122,19 +128,20 @@ defmodule Ingestor do
 
   defp ingest(files, :testing = target, opts) do
     {:ok, options} = extract_options(opts)
-    crop_length = opts[:length] || @crop_length
 
-    for file <- files, volume <- @testing_volumes, crop <- window_crops(file, crop_length) do
-      ffmpeg_cmd(file, volume, crop, target, options)
+    for file <- files, volume <- @testing_volumes, crop <- window_crops(file, opts) do
+      Task.start(fn ->
+        ffmpeg_cmd(file, volume, crop, target, options)
+      end)
     end
 
     files
   end
 
-  defp window_crops(file, crop_length) do
+  defp window_crops(file, opts) do
     file
     |> audio_length()
-    |> build_crops(crop_length)
+    |> build_crops(opts)
     # |> IO.inspect(label: "Crops")
   end
 
@@ -143,33 +150,39 @@ defmodule Ingestor do
 
   ## Examples
 
-      iex> Ingestor.build_crops(%Porcelain.Result{err: nil, out: "8.321\n", status: :ok}, 2)
+      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, %{crop_length: 2})
       [{0, 2}, {3, 2}, {4, 2}, {5, 2}, {6, 2}]
+      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, %{crop_start: 1, crop_end: 8, crop_length: 1})
+      [{1, 1}, {3, 1}, {4, 1}, {5, 1}, {6, 1}, {7, 1}]
 
   """
-  def build_crops(%Porcelain.Result{err: _, out: length_in_seconds, status: _}, crop_length) do
+  def build_crops(%Porcelain.Result{out: length_in_seconds}, opts) do
+    crop_length = opts[:crop_length] || @crop_length
+    crop_start = opts[:crop_start] || @crop_start
+
     length_in_seconds =
       length_in_seconds
       |> String.trim()
       |> String.to_float()
       |> floor()
 
-    slices = length_in_seconds |> Integer.floor_div(crop_length)
+    audio_length = (opts[:crop_end] || length_in_seconds)
+    slices =  audio_length |> Integer.floor_div(crop_length)
 
     cond do
       slices > 0 ->
-        Enum.reduce_while(0..slices, [], fn x, acc ->
+        Enum.reduce_while(crop_start..slices, [], fn x, acc ->
           case x do
-            0 ->
+            ^crop_start ->
               {:cont, [{x, crop_length} | acc]}
-            x when (x + crop_length) < length_in_seconds ->
+            x when (x + crop_length) < audio_length ->
               {:cont, [{x + crop_length, crop_length} | acc]}
             _ ->
               {:halt, acc}
           end
         end) |> Enum.reverse()
       true ->
-        @crops
+        [{0, crop_length}]
     end
   end
 
@@ -180,9 +193,13 @@ defmodule Ingestor do
 
       iex> Ingestor.extract_options([{:freq, 16000}])
       {:ok, " -ar 16000 "}
-      iex> Ingestor.extract_options([{:freq, 16000}, {:length, 2}])
+      iex> Ingestor.extract_options([{:freq, 16000}, {:crop_length, 2}])
       {:ok, " -ar 16000 "}
-      iex> Ingestor.extract_options([{:length, 2}])
+      iex> Ingestor.extract_options([{:crop_length, 2}])
+      {:ok, ""}
+      iex> Ingestor.extract_options([{:crop_start, 1}])
+      {:ok, ""}
+      iex> Ingestor.extract_options([{:crop_end, 5}])
       {:ok, ""}
 
   """
@@ -191,7 +208,11 @@ defmodule Ingestor do
       opts |> Enum.reduce("", fn
         {:freq, value}, acc ->
           acc <> " -ar #{value} "
-        {:length, _}, acc ->
+        {:crop_start, _}, acc -> # ignore option
+          acc
+        {:crop_end, _}, acc -> # ignore option
+          acc
+        {:crop_length, _}, acc -> # ignore option
           acc
         {key, value}, acc ->
           acc <> " #{key} #{value} "

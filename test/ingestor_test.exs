@@ -5,6 +5,7 @@ defmodule IngestorTest do
   setup_all %{} do
     result = Ingestor.main(["--freq", "16000"])
 
+    Process.sleep(1000)
     {:ok, result: result}
   end
 
@@ -37,7 +38,7 @@ defmodule IngestorTest do
       assert Enum.count(files) == 114
     end
 
-    test "creates 114 testing files" do
+    test "creates 30 testing files" do
       {:ok, files} = File.ls("testing")
 
       assert Enum.count(files) == 30
