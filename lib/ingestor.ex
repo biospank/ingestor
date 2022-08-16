@@ -67,29 +67,30 @@ defmodule Ingestor do
     end
   end
 
-  def run(help: true) do
+  defp run(help: true) do
     IO.puts @moduledoc
-    System.halt(0)
   end
 
-  def run(opts) do
-    with {:ok, _} <- remove_dir(@training_dir),
-         {:ok, _} <- remove_dir(@testing_dir),
-         :ok <- create_dir(@training_dir),
-         :ok <- create_dir(@testing_dir),
-         {:ok, audio_files} <- list_audio_files() do
+  defp run(opts) do
+    ProgressBar.render_spinner( [text: "Converting...", done: "Done."],fn ->
+      with {:ok, _} <- remove_dir(@training_dir),
+          {:ok, _} <- remove_dir(@testing_dir),
+          :ok <- create_dir(@training_dir),
+          :ok <- create_dir(@testing_dir),
+          {:ok, audio_files} <- list_audio_files() do
 
-      audio_files
-      |> ingest(:training, opts)
-      |> ingest(:testing, opts)
+        audio_files
+        |> ingest(:training, opts)
+        |> ingest(:testing, opts)
 
-      {:ok, :done}
-    else
-      {:error, reason} ->
-        IO.puts("Unexpected exception: #{reason}")
-      {:error, reason, file} ->
-        IO.puts("Unexpected exception: #{reason} for file #{file}")
-    end
+        {:ok, :done}
+      else
+        {:error, reason} ->
+          IO.puts("Unexpected exception: #{reason}")
+        {:error, reason, file} ->
+          IO.puts("Unexpected exception: #{reason} for file #{file}")
+      end
+    end)
   end
 
   defp create_dir(dir) do
@@ -222,9 +223,10 @@ defmodule Ingestor do
   end
 
   defp ffmpeg_cmd(file, volume, {start, length}, target, options) do
-    [name, _ext] = String.split(file, ".")
+    ext = String.split(file, ".") |> List.last()
+    name = Path.basename(file, "." <> ext)
 
-    _result = Porcelain.shell("ffmpeg -hide_banner -loglevel error -ss #{start} -i #{@data_dir}/#{file} -t #{length} #{options} -af volume=#{volume} #{target}/#{name}-#{volume}-#{start}-#{length}.wav")
+    _result = Porcelain.shell("ffmpeg -hide_banner -loglevel error -ss #{start} -i #{@data_dir}/#{file} -t #{length} #{options} -af volume=#{volume} #{target}/#{name}.#{target}-#{volume}-#{start}-#{length}.wav")
     #IO.inspect result.out
   end
 
