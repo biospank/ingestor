@@ -32,16 +32,16 @@ defmodule IngestorTest do
       assert "testing" in dirs
     end
 
-    test "creates 114 training files" do
+    test "creates 30 training files" do
       {:ok, files} = File.ls("training")
 
-      assert Enum.count(files) == 114
+      assert Enum.count(files) == 30
     end
 
-    test "creates 30 testing files" do
+    test "creates 18 testing files" do
       {:ok, files} = File.ls("testing")
 
-      assert Enum.count(files) == 30
+      assert Enum.count(files) == 18
     end
   end
 end

@@ -8,7 +8,7 @@ defmodule Ingestor do
 
   Run the script
 
-  ./ingestor [--help] [--freq 16000] [--crop_start 1 --crop_end 6] [--crop_length 2]
+  ./ingestor [--help|-h] [--freq|-z 16000] [--crop_start|-s 1 --crop_end|-e 6] [--crop_length|-l 2] [--volume_min|-v 8]
 
   """
 
@@ -23,27 +23,32 @@ defmodule Ingestor do
   #   {6, @crop_length} # start from 6th second for 2 seconds
   # ]
 
+  @volume_max 10
+
   @training_volumes ["0.8", "0.85", "0.9", "0.95", "1"]
 
   @testing_volumes ["0.8", "0.9", "1"]
 
   def main(argv) do
-    {opts, _parsed, errors} =
+    {opts, parsed, errors} =
       argv
+      |> IO.inspect(label: "argv")
       |> OptionParser.parse(
         strict: [
           help: :boolean,
           freq: :integer,
           crop_start: :integer,
           crop_end: :integer,
-          crop_length: :integer
+          crop_length: :integer,
+          volume_min: :integer
         ],
         aliases: [
           h: :help,
           z: :freq,
           s: :crop_start,
           e: :crop_end,
-          l: :crop_length
+          l: :crop_length,
+          v: :volume_min
         ]
       )
 
@@ -52,7 +57,9 @@ defmodule Ingestor do
     if errors |> Enum.empty?() do
       run(opts)
     else
-      IO.puts("Invalid options")
+      IO.puts("Invalid options: #{inspect(errors)}")
+      IO.puts("options: #{inspect(opts)}")
+      IO.puts("parsed: #{inspect(parsed)}")
       run(help: true)
       System.halt(1)
     end
@@ -109,7 +116,7 @@ defmodule Ingestor do
   defp ingest(files, :training = target, opts) do
     {:ok, options} = extract_options(opts)
 
-    for file <- files, volume <- @training_volumes, crop <- window_crops(file, opts) do
+    for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, opts) do
       Task.start(fn ->
         ffmpeg_cmd(file, volume, crop, target, options)
       end)
@@ -121,13 +128,59 @@ defmodule Ingestor do
   defp ingest(files, :testing = target, opts) do
     {:ok, options} = extract_options(opts)
 
-    for file <- files, volume <- @testing_volumes, crop <- window_crops(file, opts) do
+    for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, opts) do
       Task.start(fn ->
         ffmpeg_cmd(file, volume, crop, target, options)
       end)
     end
 
     files
+  end
+
+  @doc ~S"""
+  compose a list of string volumes
+  - 0.05 step for training
+  - 1 step for testing
+
+  ## Examples
+
+      iex> Ingestor.volumes(:training, %{volume_min: 8})
+      ["0.8", "0.85", "0.9", "0.95", "1.0"]
+      iex> Ingestor.volumes(:testing, %{volume_min: 8})
+      ["0.8", "0.9", "1.0"]
+
+  """
+  def volumes(:training, opts) do
+    case opts[:volume_min] do
+      nil ->
+        @training_volumes
+      volume_min ->
+        Enum.reduce_while(volume_min..@volume_max, [], fn x, acc ->
+          case x do
+            @volume_max ->
+              {:cont, [(x * 0.1) |> Float.round(2) |> Float.to_string() | acc]}
+            x ->
+              {:cont,
+                [
+                  (x * 0.1 + 0.05) |> Float.round(2) |> Float.to_string() | [
+                    (x * 0.1) |> Float.round(2) |> Float.to_string() | acc
+                  ]
+                ]
+              }
+          end
+        end) |> Enum.reverse()
+    end
+  end
+
+  def volumes(:testing, opts) do
+    case opts[:volume_min] do
+      nil ->
+        @testing_volumes
+      volume_min ->
+        Enum.map(volume_min..@volume_max, fn x ->
+          (x * 0.1) |> Float.round(1) |> Float.to_string()
+        end)
+    end
   end
 
   defp window_crops(file, opts) do
@@ -206,7 +259,7 @@ defmodule Ingestor do
           acc
         {:crop_length, _}, acc -> # ignore option
           acc
-        {:volume_start, _}, acc -> # ignore option
+        {:volume_min, _}, acc -> # ignore option
           acc
         {key, value}, acc ->
           acc <> " #{key} #{value} "
