@@ -12,9 +12,9 @@ defmodule Ingestor do
 
   """
 
+  @data_dir "data"
   @training_dir "training"
   @testing_dir "testing"
-  @data_dir "data"
 
   @crop_start 0
   @crop_length 2
@@ -23,18 +23,9 @@ defmodule Ingestor do
   #   {6, @crop_length} # start from 6th second for 2 seconds
   # ]
 
-  @training_volumes [
-    "0.1", "0.15", "0.2",
-    "0.25", "0.3", "0.35",
-    "0.4", "0.45", "0.5",
-    "0.55", "0.6", "0.65",
-    "0.7", "0.75", "0.8",
-    "0.85", "0.9", "0.95", "1"
-  ]
+  @training_volumes ["0.8", "0.85", "0.9", "0.95", "1"]
 
-  @testing_volumes [
-    "0.2", "0.4", "0.6", "0.8", "1"
-  ]
+  @testing_volumes ["0.8", "0.9", "1"]
 
   def main(argv) do
     {opts, _parsed, errors} =
@@ -214,6 +205,8 @@ defmodule Ingestor do
         {:crop_end, _}, acc -> # ignore option
           acc
         {:crop_length, _}, acc -> # ignore option
+          acc
+        {:volume_start, _}, acc -> # ignore option
           acc
         {key, value}, acc ->
           acc <> " #{key} #{value} "
