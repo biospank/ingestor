@@ -8,7 +8,7 @@ defmodule Ingestor do
 
   Run the script
 
-  ./ingestor [--help|-h] [--freq|-z 16000] [--crop_start|-s 1 --crop_end|-e 6] [--crop_length|-l 2] [--volume_min|-v 8]
+  ./ingestor [--help|-h] [--targer|-t training|testing] [--freq|-z 16000] [--crop_start|-s 1 --crop_end|-e 6] [--crop_length|-l 2] [--volume_min|-v 8]
 
   """
 
@@ -17,7 +17,7 @@ defmodule Ingestor do
   @testing_dir "testing"
 
   @crop_start 0
-  @crop_length 2
+  @crop_length 1
   # @crops [
   #   {3, @crop_length}, # start from 3rd second for 2 seconds
   #   {6, @crop_length} # start from 6th second for 2 seconds
@@ -25,9 +25,9 @@ defmodule Ingestor do
 
   @volume_max 10
 
-  @training_volumes ["0.8", "0.85", "0.9", "0.95", "1"]
+  @training_volumes ["0.9", "0.95", "1"]
 
-  @testing_volumes ["0.8", "0.9", "1"]
+  @testing_volumes ["0.9", "1"]
 
   def main(argv) do
     {opts, parsed, errors} =
@@ -36,6 +36,7 @@ defmodule Ingestor do
       |> OptionParser.parse(
         strict: [
           help: :boolean,
+          target: :string,
           freq: :integer,
           crop_start: :integer,
           crop_end: :integer,
@@ -44,6 +45,7 @@ defmodule Ingestor do
         ],
         aliases: [
           h: :help,
+          t: :target,
           z: :freq,
           s: :crop_start,
           e: :crop_end,
@@ -71,15 +73,14 @@ defmodule Ingestor do
 
   defp run(opts) do
     ProgressBar.render_spinner( [text: "Converting...", done: "Done."],fn ->
-      with {:ok, _} <- remove_dir(@training_dir),
-          {:ok, _} <- remove_dir(@testing_dir),
-          :ok <- create_dir(@training_dir),
-          :ok <- create_dir(@testing_dir),
+      target = (opts[:target] || "training") |> String.to_atom()
+
+      with {:ok, _} <- remove_dir(target),
+          :ok <- create_dir(target),
           {:ok, audio_files} <- list_audio_files() do
 
         audio_files
-        |> ingest(:training, opts)
-        |> ingest(:testing, opts)
+        |> ingest(target, opts)
 
         {:ok, :done}
       else
@@ -91,13 +92,11 @@ defmodule Ingestor do
     end)
   end
 
-  defp create_dir(dir) do
-    File.mkdir_p(dir)
-  end
+  defp create_dir(:training), do: File.mkdir_p(@training_dir)
+  defp create_dir(:testing), do: File.mkdir_p(@testing_dir)
 
-  defp remove_dir(dir) do
-    File.rm_rf(dir)
-  end
+  defp remove_dir(:training), do: File.rm_rf(@training_dir)
+  defp remove_dir(:testing), do: File.rm_rf(@testing_dir)
 
   @doc ~S"""
   list_audio_files.
@@ -114,24 +113,26 @@ defmodule Ingestor do
   end
 
   defp ingest(files, :training = target, opts) do
-    {:ok, options} = extract_options(opts)
+    {:ok, ffmpeg_options} = extract_ffmpeg_options(opts)
 
     for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, opts) do
-      Task.start(fn ->
-        ffmpeg_cmd(file, volume, crop, target, options)
-      end)
+      #IO.puts("Starting training task for file #{file} volume #{volume} and crop #{inspect(crop)}")
+      # Task.start(fn ->
+        ffmpeg_cmd(file, volume, crop, target, ffmpeg_options)
+      # end)
     end
 
     files
   end
 
   defp ingest(files, :testing = target, opts) do
-    {:ok, options} = extract_options(opts)
+    {:ok, ffmpeg_options} = extract_ffmpeg_options(opts)
 
     for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, opts) do
-      Task.start(fn ->
-        ffmpeg_cmd(file, volume, crop, target, options)
-      end)
+      #IO.puts("Starting testing task for file #{file} volume #{volume} and crop #{inspect(crop)}")
+      # Task.start(fn ->
+        ffmpeg_cmd(file, volume, crop, target, ffmpeg_options)
+      # end)
     end
 
     files
@@ -140,7 +141,7 @@ defmodule Ingestor do
   @doc ~S"""
   compose a list of string volumes
   - 0.05 step for training
-  - 1 step for testing
+  - 0.1 step for testing
 
   ## Examples
 
@@ -168,7 +169,7 @@ defmodule Ingestor do
                 ]
               }
           end
-        end) |> Enum.reverse()
+        end) #|> Enum.reverse()
     end
   end
 
@@ -248,11 +249,13 @@ defmodule Ingestor do
       {:ok, ""}
 
   """
-  def extract_options(opts) do
+  def extract_ffmpeg_options(opts) do
     options =
       opts |> Enum.reduce("", fn
         {:freq, value}, acc ->
           acc <> " -ar #{value} "
+        {:target, _}, acc -> # ignore option
+          acc
         {:crop_start, _}, acc -> # ignore option
           acc
         {:crop_end, _}, acc -> # ignore option
