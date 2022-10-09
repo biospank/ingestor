@@ -25,9 +25,9 @@ defmodule Ingestor do
 
   @volume_max 10
 
-  @training_volumes ["0.9", "0.95", "1"]
+  @training_volumes ["0.8", "0.85", "0.9", "0.95", "1"]
 
-  @testing_volumes ["0.9", "1"]
+  @testing_volumes ["0.8", "0.9", "1"]
 
   def main(argv) do
     {opts, parsed, errors} =
@@ -115,7 +115,7 @@ defmodule Ingestor do
   defp ingest(files, :training = target, opts) do
     {:ok, ffmpeg_options} = extract_ffmpeg_options(opts)
 
-    for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, opts) do
+    for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, target, opts) do
       #IO.puts("Starting training task for file #{file} volume #{volume} and crop #{inspect(crop)}")
       # Task.start(fn ->
         ffmpeg_cmd(file, volume, crop, target, ffmpeg_options)
@@ -128,7 +128,7 @@ defmodule Ingestor do
   defp ingest(files, :testing = target, opts) do
     {:ok, ffmpeg_options} = extract_ffmpeg_options(opts)
 
-    for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, opts) do
+    for file <- files, volume <- volumes(target, opts), crop <- window_crops(file, target, opts) do
       #IO.puts("Starting testing task for file #{file} volume #{volume} and crop #{inspect(crop)}")
       # Task.start(fn ->
         ffmpeg_cmd(file, volume, crop, target, ffmpeg_options)
@@ -184,10 +184,10 @@ defmodule Ingestor do
     end
   end
 
-  defp window_crops(file, opts) do
+  defp window_crops(file, target, opts) do
     file
     |> audio_length()
-    |> build_crops(opts)
+    |> build_crops(target, opts)
     # |> IO.inspect(label: "Crops")
   end
 
@@ -196,13 +196,17 @@ defmodule Ingestor do
 
   ## Examples
 
-      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, %{crop_length: 2})
+      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, :training, %{crop_length: 2})
       [{0, 2}, {3, 2}, {4, 2}, {5, 2}, {6, 2}]
-      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, %{crop_start: 1, crop_end: 8, crop_length: 1})
+      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, :training, %{crop_start: 1, crop_end: 8, crop_length: 1})
+      [{1, 1}, {3, 1}, {4, 1}, {5, 1}, {6, 1}, {7, 1}]
+      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, :testing, %{crop_length: 2})
+      [{0, 2}, {3, 2}, {4, 2}, {5, 2}, {6, 2}]
+      iex> Ingestor.build_crops(%Porcelain.Result{out: "8.321\n"}, :testing, %{crop_start: 1, crop_end: 8, crop_length: 1})
       [{1, 1}, {3, 1}, {4, 1}, {5, 1}, {6, 1}, {7, 1}]
 
   """
-  def build_crops(%Porcelain.Result{out: length_in_seconds}, opts) do
+  def build_crops(%Porcelain.Result{out: length_in_seconds}, :training, opts) do
     crop_length = opts[:crop_length] || @crop_length
     crop_start = opts[:crop_start] || @crop_start
 
@@ -218,6 +222,36 @@ defmodule Ingestor do
     cond do
       slices > 0 ->
         Enum.reduce_while(crop_start..slices, [], fn x, acc ->
+          case x do
+            ^crop_start ->
+              {:cont, [{x, crop_length} | acc]}
+            x when (x + crop_length) < audio_length ->
+              {:cont, [{x + crop_length, crop_length} | acc]}
+            _ ->
+              {:halt, acc}
+          end
+        end) |> Enum.reverse()
+      true ->
+        [{0, crop_length}]
+    end
+  end
+
+  def build_crops(%Porcelain.Result{out: length_in_seconds}, :testing, opts) do
+    crop_length = opts[:crop_length] || @crop_length
+    crop_start = opts[:crop_start] || @crop_start
+
+    length_in_seconds =
+      length_in_seconds
+      |> String.trim()
+      |> String.to_float()
+      |> floor()
+
+    audio_length = (opts[:crop_end] || length_in_seconds)
+    slices =  audio_length |> Integer.floor_div(crop_length)
+
+    cond do
+      slices > 0 ->
+        Enum.reduce_while(Range.new(crop_start, slices, 5), [], fn x, acc ->
           case x do
             ^crop_start ->
               {:cont, [{x, crop_length} | acc]}
